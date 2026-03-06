@@ -78,24 +78,19 @@
                 document.getElementById('statusText').innerText = "Mengambil layanan...";
                 const service = await server.getPrimaryService(SERVICE_UUID);
 
-                // Ambil karakteristik kontrol
                 controlCharacteristic = await service.getCharacteristic(CONTROL_CHAR_UUID);
 
-                // Ambil karakteristik token dan baca nilainya
+                // --- BAGIAN YANG DIPERBARUI: Mendengarkan Notifikasi ---
                 const tokenCharacteristic = await service.getCharacteristic(TOKEN_CHAR_UUID);
-                const value = await tokenCharacteristic.readValue();
-                const decoder = new TextDecoder('utf-8');
-                activeToken = decoder.decode(value);
-
-                document.getElementById('tokenInput').value = activeToken;
-                document.getElementById('statusText').innerText = "Token berhasil didapatkan!";
-                document.getElementById('statusText').classList.add("text-emerald-400");
                 
-                // Aktifkan tombol login
-                const btnLogin = document.getElementById('btnLogin');
-                btnLogin.disabled = false;
-                btnLogin.classList.replace('bg-slate-600', 'bg-emerald-600');
-                btnLogin.classList.replace('cursor-not-allowed', 'hover:bg-emerald-500');
+                // Aktifkan notifikasi untuk memantau perubahan token secara real-time
+                await tokenCharacteristic.startNotifications();
+                tokenCharacteristic.addEventListener('characteristicvaluechanged', handleTokenChange);
+
+                // Baca nilai pertama kali
+                const value = await tokenCharacteristic.readValue();
+                processTokenValue(value);
+                // -------------------------------------------------------
 
             } catch (error) {
                 console.error(error);
@@ -104,9 +99,43 @@
             }
         }
 
+        // Fungsi baru untuk memproses data dari Bluetooth
+        function processTokenValue(dataView) {
+            const decoder = new TextDecoder('utf-8');
+            activeToken = decoder.decode(dataView);
+            document.getElementById('tokenInput').value = activeToken;
+
+            if (activeToken === "EXPIRED") {
+                // Jika token hangus, berikan peringatan dan kunci sistem
+                document.getElementById('statusText').innerText = "WAKTU HABIS! Token kadaluarsa.";
+                document.getElementById('statusText').className = "text-xs text-center text-rose-500 font-bold mt-2";
+                
+                const btnLogin = document.getElementById('btnLogin');
+                btnLogin.disabled = true;
+                btnLogin.className = "w-full bg-slate-600 cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg transition duration-300";
+                
+                // Tendang kembali ke halaman login jika sedang di dashboard
+                document.getElementById('login-section').classList.remove('hidden');
+                document.getElementById('dashboard-section').classList.add('hidden');
+            } else {
+                // Jika token valid (berupa angka)
+                document.getElementById('statusText').innerText = "Token berhasil didapatkan!";
+                document.getElementById('statusText').className = "text-xs text-center text-emerald-400 mt-2";
+                
+                const btnLogin = document.getElementById('btnLogin');
+                btnLogin.disabled = false;
+                btnLogin.className = "w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-lg transition duration-300";
+            }
+        }
+
+        // Fungsi baru yang dipicu otomatis oleh ESP32 saat token berubah
+        function handleTokenChange(event) {
+            const value = event.target.value;
+            processTokenValue(value);
+        }
+
         function verifyLogin() {
-            // Simulasi pengecekan di sisi klien, validasi sesungguhnya ada di ESP32 saat eksekusi
-            if(document.getElementById('tokenInput').value !== "" && document.getElementById('tokenInput').value !== "EXPIRED") {
+            if(activeToken !== "" && activeToken !== "EXPIRED") {
                 document.getElementById('login-section').classList.add('hidden');
                 document.getElementById('dashboard-section').classList.remove('hidden');
             }
@@ -115,14 +144,12 @@
         async function sendControl(command) {
             if (!controlCharacteristic) return;
             try {
-                // Menggabungkan token dan perintah (misal: "123456_ON")
                 const payload = activeToken + "_" + command;
                 const encoder = new TextEncoder('utf-8');
                 await controlCharacteristic.writeValue(encoder.encode(payload));
                 console.log("Perintah terkirim: " + payload);
             } catch (error) {
-                alert("Gagal mengirim perintah. Token mungkin sudah hangus atau Bluetooth terputus.");
-                onDisconnected();
+                alert("Gagal mengirim perintah.");
             }
         }
 
