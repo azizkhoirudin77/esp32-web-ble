@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 Secure Login</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0f172a; color: white; }
+        .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen">
+
+    <div class="glass p-8 rounded-2xl shadow-2xl w-full max-w-md mx-4">
+        
+        <div id="login-section">
+            <h2 class="text-2xl font-bold mb-6 text-center text-blue-400">ESP32 Secure Gate</h2>
+            
+            <div class="mb-4">
+                <button id="btnConnect" onclick="connectBluetooth()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 px-4 rounded-lg transition duration-300">
+                    1. Hubungkan Bluetooth
+                </button>
+            </div>
+
+            <div class="mb-6 relative">
+                <input type="text" id="tokenInput" readonly placeholder="Token akan muncul di sini..." class="w-full bg-slate-800 border border-slate-600 text-center text-2xl tracking-widest text-white rounded-lg p-3 focus:outline-none focus:border-blue-500">
+                <p id="statusText" class="text-xs text-center text-slate-400 mt-2">Menunggu koneksi perangkat...</p>
+            </div>
+
+            <button id="btnLogin" onclick="verifyLogin()" disabled class="w-full bg-slate-600 cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg transition duration-300">
+                2. Verifikasi & Login
+            </button>
+        </div>
+
+        <div id="dashboard-section" class="hidden">
+            <h2 class="text-2xl font-bold mb-2 text-center text-emerald-400">Dashboard Kontrol</h2>
+            <p class="text-sm text-center text-slate-400 mb-6">Akses disetujui. Token valid selama 1 menit.</p>
+
+            <div class="flex space-x-4">
+                <button onclick="sendControl('ON')" class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl transition duration-300 shadow-lg shadow-emerald-500/30">
+                    NYALAKAN LED
+                </button>
+                <button onclick="sendControl('OFF')" class="flex-1 bg-rose-600 hover:bg-rose-500 text-white font-bold py-4 rounded-xl transition duration-300 shadow-lg shadow-rose-500/30">
+                    MATIKAN LED
+                </button>
+            </div>
+            
+            <button onclick="disconnectDevice()" class="w-full mt-6 bg-transparent border border-slate-500 hover:bg-slate-700 text-white py-2 rounded-lg transition duration-300">
+                Putuskan Koneksi
+            </button>
+        </div>
+
+    </div>
+
+    <script>
+        const SERVICE_UUID = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
+        const TOKEN_CHAR_UUID = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
+        const CONTROL_CHAR_UUID = 'e3223119-9445-4e96-a4a1-85358ce291d3';
+
+        let bleDevice = null;
+        let controlCharacteristic = null;
+        let activeToken = "";
+
+        async function connectBluetooth() {
+            try {
+                document.getElementById('statusText').innerText = "Memindai perangkat...";
+                bleDevice = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'ESP32_SecureKey' }],
+                    optionalServices: [SERVICE_UUID]
+                });
+
+                bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
+
+                document.getElementById('statusText').innerText = "Menghubungkan ke server...";
+                const server = await bleDevice.gatt.connect();
+
+                document.getElementById('statusText').innerText = "Mengambil layanan...";
+                const service = await server.getPrimaryService(SERVICE_UUID);
+
+                // Ambil karakteristik kontrol
+                controlCharacteristic = await service.getCharacteristic(CONTROL_CHAR_UUID);
+
+                // Ambil karakteristik token dan baca nilainya
+                const tokenCharacteristic = await service.getCharacteristic(TOKEN_CHAR_UUID);
+                const value = await tokenCharacteristic.readValue();
+                const decoder = new TextDecoder('utf-8');
+                activeToken = decoder.decode(value);
+
+                document.getElementById('tokenInput').value = activeToken;
+                document.getElementById('statusText').innerText = "Token berhasil didapatkan!";
+                document.getElementById('statusText').classList.add("text-emerald-400");
+                
+                // Aktifkan tombol login
+                const btnLogin = document.getElementById('btnLogin');
+                btnLogin.disabled = false;
+                btnLogin.classList.replace('bg-slate-600', 'bg-emerald-600');
+                btnLogin.classList.replace('cursor-not-allowed', 'hover:bg-emerald-500');
+
+            } catch (error) {
+                console.error(error);
+                document.getElementById('statusText').innerText = "Gagal: " + error;
+                document.getElementById('statusText').classList.add("text-rose-400");
+            }
+        }
+
+        function verifyLogin() {
+            // Simulasi pengecekan di sisi klien, validasi sesungguhnya ada di ESP32 saat eksekusi
+            if(document.getElementById('tokenInput').value !== "" && document.getElementById('tokenInput').value !== "EXPIRED") {
+                document.getElementById('login-section').classList.add('hidden');
+                document.getElementById('dashboard-section').classList.remove('hidden');
+            }
+        }
+
+        async function sendControl(command) {
+            if (!controlCharacteristic) return;
+            try {
+                // Menggabungkan token dan perintah (misal: "123456_ON")
+                const payload = activeToken + "_" + command;
+                const encoder = new TextEncoder('utf-8');
+                await controlCharacteristic.writeValue(encoder.encode(payload));
+                console.log("Perintah terkirim: " + payload);
+            } catch (error) {
+                alert("Gagal mengirim perintah. Token mungkin sudah hangus atau Bluetooth terputus.");
+                onDisconnected();
+            }
+        }
+
+        function disconnectDevice() {
+            if (bleDevice && bleDevice.gatt.connected) {
+                bleDevice.gatt.disconnect();
+            }
+        }
+
+        function onDisconnected() {
+            document.getElementById('login-section').classList.remove('hidden');
+            document.getElementById('dashboard-section').classList.add('hidden');
+            document.getElementById('tokenInput').value = "";
+            document.getElementById('statusText').innerText = "Koneksi terputus. Silakan hubungkan ulang.";
+            document.getElementById('statusText').className = "text-xs text-center text-rose-400 mt-2";
+            
+            const btnLogin = document.getElementById('btnLogin');
+            btnLogin.disabled = true;
+            btnLogin.className = "w-full bg-slate-600 cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg transition duration-300";
+        }
+    </script>
+</body>
+</html>
