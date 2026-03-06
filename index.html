@@ -19,7 +19,7 @@
             
             <div class="mb-4">
                 <button id="btnConnect" onclick="connectBluetooth()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 px-4 rounded-lg transition duration-300">
-                    1. Hubungkan Bluetooth
+                    Hubungkan Bluetooth
                 </button>
             </div>
 
@@ -29,7 +29,7 @@
             </div>
 
             <button id="btnLogin" onclick="verifyLogin()" disabled class="w-full bg-slate-600 cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg transition duration-300">
-                2. Verifikasi & Login
+                Verifikasi & Login
             </button>
         </div>
 
@@ -134,13 +134,25 @@
             processTokenValue(value);
         }
 
-        function verifyLogin() {
+       async function verifyLogin() {
             if(activeToken !== "" && activeToken !== "EXPIRED") {
-                document.getElementById('login-section').classList.add('hidden');
-                document.getElementById('dashboard-section').classList.remove('hidden');
+                try {
+                    // Beri tahu ESP32 bahwa kita menekan tombol login
+                    const payload = activeToken + "_LOGIN";
+                    const encoder = new TextEncoder('utf-8');
+                    await controlCharacteristic.writeValue(encoder.encode(payload));
+                    
+                    // Jika berhasil terkirim, buka Dashboard
+                    document.getElementById('login-section').classList.add('hidden');
+                    document.getElementById('dashboard-section').classList.remove('hidden');
+                    
+                    // Ubah status teks agar terlihat permanen
+                    document.getElementById('statusText').innerText = "Sesi Aktif.";
+                } catch (error) {
+                    alert("Gagal melakukan verifikasi ke ESP32.");
+                }
             }
         }
-
         async function sendControl(command) {
             if (!controlCharacteristic) return;
             try {
